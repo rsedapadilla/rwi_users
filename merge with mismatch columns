@@ -1,0 +1,138 @@
+/*Acquire an image of the tables to merge from impala;*/
+
+proc sql noprint;
+	connect to impala (dsn="us-prd" database="default");
+	
+	create table sum05 as select * from connection to impala (
+		select * from truven_commercial_claims.populations_05 limit 1;
+	);
+
+	create table sum06 as select * from connection to impala (
+		select * from truven_commercial_claims.populations_06 limit 1;
+	);
+	create table sum07 as select * from connection to impala (
+		select * from truven_commercial_claims.populations_07 limit 1;
+	);
+	create table sum08 as select * from connection to impala (
+		select * from truven_commercial_claims.populations_08 limit 1;
+	);
+	create table sum09 as select * from connection to impala (
+		select * from truven_commercial_claims.populations_09 limit 1;
+	);
+	create table sum10 as select * from connection to impala (
+		select * from truven_commercial_claims.populations_10 limit 1;
+	);
+	create table sum11 as select * from connection to impala (
+		select * from truven_commercial_claims.populations_11 limit 1;
+	);
+	create table sum12 as select * from connection to impala (
+		select * from truven_commercial_claims.populations_12 limit 1;
+	);
+	create table sum13 as select * from connection to impala (
+		select * from truven_commercial_claims.populations_13 limit 1;
+	);
+	create table sum14 as select * from connection to impala (
+		select * from truven_commercial_claims.populations_14 limit 1;
+	);
+	create table sum15 as select * from connection to impala (
+		select * from truven_commercial_claims.populations_15 limit 1;
+	);
+
+	disconnect from impala;
+quit;
+
+/*Merge the tables to build a full column list;*/
+data assembledsum;
+  set sum05
+  	 sum06
+  	 sum07
+  	 sum08
+  	 sum09
+  	 sum10
+  	 sum11
+  	 sum12
+  	 sum13
+  	 sum14
+  	 sum15;
+ run;
+
+/*Utility macros to build column images, currently only supports string
+	as that was the only column in the supplied sample;*/
+	
+%macro listcols(__lib, __ds);
+	%let __id =%sysfunc(open(sashelp.vcolumn(where=(lowcase(memname) eq "&__ds" and lowcase(libname) eq "&__lib"))),i);
+	%let __nobs =%sysfunc(attrn(&__id, nobs));	
+	%syscall set(__id);
+	%let __first=1;
+	%do %until(%sysfunc(fetch(&__id)) ne 0);
+  		%if &__first ne 1 %then %do;,%end;
+  		%if (%symexist(name)) %then %do;
+			%sysfunc(compress(&name.))
+			%let __first=0;
+		%end;
+	%end;
+	%let __id=%sysfunc(close(&__id));
+%mend;
+%macro createcols(__lib, __ds);
+	%let __id =%sysfunc(open(sashelp.vcolumn(where=(lowcase(memname) eq "&__ds" and lowcase(libname) eq "&__lib"))),i);
+	%let __nobs =%sysfunc(attrn(&__id, nobs));	
+	%syscall set(__id);
+	%let __first=1;
+	%do %until(%sysfunc(fetch(&__id)) ne 0);
+  		%if &__first ne 1 %then %do;,%end;
+  		%if (%symexist(name)) %then %do;
+			%sysfunc(compress(&name))
+			%if "&type" eq "char" %then %do; String%end;%else %do; %sysfunc(compress(&type));%end;
+			%let __first=0;
+		%end;
+	%end;
+	%let __id=%sysfunc(close(&__id));
+%mend;
+%macro loadtable(srcSchema,srcTable,tgtSchema, tgtTable, srcWorkImage);
+	%local lcols;
+	%let lcols=%listcols(work,&srcWorkImage.);
+	
+	execute(
+		insert into &tgtSchema..&tgtTable. (&lcols.)
+		 select &lcols. from &srcSchema..&srcTable.
+	) by impala;
+%mend;
+
+/*Pick up the column list for the main create statement that uses all the columns;*/
+%global createcols;
+%let createcols=%createcols(work,assembledsum);
+
+/* options SASTRACE = ",,,d" sastraceloc=saslog;  */
+
+/*Run the commands in impala;*/
+proc sql noprint;
+	connect to impala (dsn="us-prd" database="default");
+
+	execute(
+		DROP TABLE IF EXISTS sandbox_grwi.trvn_cmm_populations
+	) by impala;
+	
+	*Create the table using the merged column list;
+	execute(
+		create table sandbox_grwi.trvn_cmm_populations
+		(&createcols)
+	) by impala;
+
+	/*Add the tables into the new merged table matching the columns as supplied by each;*/	
+	%loadtable(truven_commercial_claims,populations_05,sandbox_grwi,trvn_cmm_populations, sum05);
+	%loadtable(truven_commercial_claims,populations_06,sandbox_grwi,trvn_cmm_populations, sum06);
+	%loadtable(truven_commercial_claims,populations_07,sandbox_grwi,trvn_cmm_populations, sum07);
+	%loadtable(truven_commercial_claims,populations_08,sandbox_grwi,trvn_cmm_populations, sum08);
+	%loadtable(truven_commercial_claims,populations_09,sandbox_grwi,trvn_cmm_populations, sum09);
+	%loadtable(truven_commercial_claims,populations_10,sandbox_grwi,trvn_cmm_populations, sum10);
+	%loadtable(truven_commercial_claims,populations_11,sandbox_grwi,trvn_cmm_populations, sum11);
+	%loadtable(truven_commercial_claims,populations_12,sandbox_grwi,trvn_cmm_populations, sum12);
+	%loadtable(truven_commercial_claims,populations_13,sandbox_grwi,trvn_cmm_populations, sum13);
+	%loadtable(truven_commercial_claims,populations_14,sandbox_grwi,trvn_cmm_populations, sum14);
+	%loadtable(truven_commercial_claims,populations_15,sandbox_grwi,trvn_cmm_populations, sum15);
+
+	/*Tell impala to rebuild its metadata for this new table;*/
+	execute (invalidate metadata sandbox_grwi.trvn_cmm_populations) by impala;
+	
+	disconnect from impala;
+quit;
