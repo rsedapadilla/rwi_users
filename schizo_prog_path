@@ -1,0 +1,149 @@
+
+libname cog sasioimp dsn="us-prd" database="sha_cognitive_claims";
+libname rwi sasioimp dsn="us-prd" database="sandbox_grwi";
+
+
+ ****IMPALA QUERY ----------- MUST BE RUN BEFORE THIS PROGRAM***;
+
+
+	/*Statements to access date within libraries in impala*/
+
+proc datasets lib=rwi;
+DELETE rsp_schizo_noalz_prog_test_sas rsp_schizo_noalz_prog_test_sas2;
+RUN;
+
+data rwi.rsp_schizo_noalz_prog_test_sas;
+
+	/*Set table where the data is located*/
+
+	set rwi.rsp_schizo_noalz_prog_diag_line;
+	
+	by patient_id service_date;
+
+	/*Do we need these statement if we are working with diagnoses?*/
+
+	/*if sum(herceptin, cyramza, kadcyla, cisplatin, epirubicin, oxaliplatin, capecitabine, fluorouracil, leucovorin, chemo) gt 0;
+	gap=max(0, datepart(startdt)-datepart(lag(enddt)));
+	
+	if first.patient_id then gap=0;
+	currther=compress(herceptin||cyramza||kadcyla||cisplatin||epirubicin||oxaliplatin||capecitabine||fluorouracil||leucovorin||chemo);
+	if sum(of epirubicin, oxaliplatin, capecitabine)=3 then eox = 1; else eox=0;
+	if sum(of leucovorin, fluorouracil, oxaliplatin)=3 then folfox=1; else folfox=0;
+	if sum(of epirubicin, cisplatin, fluorouracil)=3 then ecf=1; else ecf=0;
+	noeox=sum(of chemo, cisplatin, fluorouracil);
+	nofolfox=sum(of chemo, cisplatin, epirubicin, capecitabine);
+	noecf=sum(of chemo, oxaliplatin, capecitabine);
+	allchemo=sum(of chemo, cisplatin, epirubicin, oxaliplatin, capecitabine, fluorouracil);*/
+	
+	/*why 30?*/
+
+length diagnosis_group $30.;
+
+	/*Statements to set up diagnosis groups*/
+
+	if simple gt 0 and disorganized=0 and catatonic=0 and paranoid=0 and schizophreniform=0 and latent=0 and residual=0 and schizoaffective=0 and other=0 and unspecified=0 then 
+		diagnosis_group='SIMPLE';
+
+	else if  disorganized gt 0 and simple=0 and catatonic=0 and paranoid=0 and schizophreniform=0 and latent=0 and residual=0 and schizoaffective=0 and other=0 and unspecified=0 then 
+		diagnosis_group='DISORGANIZED';
+
+	else if  catatonic gt 0 and simple=0 and disorganized=0 and paranoid=0 and schizophreniform=0 and latent=0 and residual=0 and schizoaffective=0 and other=0 and unspecified=0 then 
+		diagnosis_group='CATATONIC';
+
+	else if  paranoid gt 0 and simple=0 and disorganized=0 and catatonic=0 and schizophreniform=0 and latent=0 and residual=0 and schizoaffective=0 and other=0 and unspecified=0 then 
+		diagnosis_group='PARANOID';
+	
+	else if  schizophreniform gt 0 and simple=0 and disorganized=0 and catatonic=0 and paranoid=0 and latent=0 and residual=0 and schizoaffective=0 and other=0 and unspecified=0 then 
+		diagnosis_group='SCHIZOPHRENIFORM';
+
+	else if  latent gt 0 and simple=0 and disorganized=0 and catatonic=0 and paranoid=0 and schizophreniform=0 and residual=0 and schizoaffective=0 and other=0 and unspecified=0 then 
+		diagnosis_group='LATENT';
+
+	else if  residual gt 0 and simple=0 and disorganized=0 and catatonic=0 and paranoid=0 and schizophreniform=0 and latent=0 and schizoaffective=0 and other=0 and unspecified=0 then 
+		diagnosis_group='RESIDUAL';
+
+	else if  schizoaffective gt 0 and simple=0 and disorganized=0 and catatonic=0 and paranoid=0 and schizophreniform=0 and latent=0 and residual=0 and other=0 and unspecified=0 then 
+		diagnosis_group='SCHIZOAFFECTIVE';
+
+	else if  other gt 0 and simple=0 and disorganized=0 and catatonic=0 and paranoid=0 and schizophreniform=0 and latent=0 and residual=0 and schizoaffective=0 and unspecified=0 then 
+		diagnosis_group='OTHER';
+
+	else if  unspecified gt 0 and simple=0 and disorganized=0 and catatonic=0 and paranoid=0 and schizophreniform=0 and latent=0 and residual=0 and schizoaffective=0 and other=0 then 
+		diagnosis_group='UNSPECIFIED';
+
+	else diagnosis_group='MULTIPLE';
+
+
+	/*What does ptstart and ctstart do?*/
+
+
+if first.patient_id then
+	ptstart=datepart(service_date);
+retain ptstart;
+
+
+if first.patient_id then
+	ctstart=datepart(service_date);
+
+
+if diagnosis_group ne lag(diagnosis_group) or patient_id ne lag(patient_id) then
+	ctstart=datepart(service_date);
+retain ctstart;
+
+*if diagnosis_group=lag(diagnosis_group) and patient_id=lag(patient_id) then ctstart=datepart(lag(service_date));
+
+if first.patient_id then
+	diag=0;
+retain diag;
+
+if diagnosis_group ne lag(diagnosis_group) and patient_id=lag(patient_id) then
+	diag+1;
+
+if patient_id ne lag(patient_id) then
+	diag=diag-diag+1;
+
+if diag=. then
+	diag=1;
+	
+	
+
+	
+format ptstart ctstart date10.;
+
+run;
+
+
+
+
+proc freq data=rwi.rsp_schizo_noalz_prog_test_sas;
+	
+	tables diagnosis_group;
+
+run;
+
+
+proc sort data=rwi.rsp_schizo_noalz_prog_test_sas out = rwi.rsp_path0;
+by patient_id ctstart;
+run;
+
+
+proc transpose data=rwi.rsp_path0(where=(ctstart=service_date)) prefix=T_ out=rwi.rsp_path1;
+by patient_id;
+var diagnosis_group;
+run;
+
+proc freq data=rwi.rsp_path1 noprint;
+table t_1*t_2*t_3*t_4*t_5/out=rwi.rsp_pathfin;
+run;
+
+
+
+
+
+	
+
+
+
+
+
+
